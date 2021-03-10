@@ -11,18 +11,64 @@ import (
 	"github.com/nacos-group/nacos-sdk-go/vo"
 )
 
+type Option func(*options)
+
+type options struct {
+	endpoint string
+
+	namespaceID string
+
+	group  string
+	dataID string
+
+	logDir   string
+	cacheDir string
+}
+
+func Group(group string) Option {
+	return func(o *options) {
+		o.group = group
+	}
+}
+
+func DataID(dataID string) Option {
+	return func(o *options) {
+		o.dataID = dataID
+	}
+}
+
+func LogDir(logDir string) Option {
+	return func(o *options) {
+		o.logDir = logDir
+	}
+}
+
+func CacheDir(cacheDir string) Option {
+	return func(o *options) {
+		o.cacheDir = cacheDir
+	}
+}
+
 type Config struct {
-	Group  string
-	DataID string
-
-	LogDir   string //可以不配置
-	CacheDir string //可以不配置
-
+	opts   options
 	client config_client.IConfigClient
 }
 
-func NewSource(endpoint string, namespaceID string, group string, dataID string, logDir string, cacheDir string) config.Source {
-	raw, err := url.Parse(endpoint)
+func NewSource(endpoint string, namespaceID string, opts ...Option) config.Source {
+	_options := options{}
+	for _, o := range opts {
+		o(&_options)
+	}
+	c := &Config{
+		opts: _options,
+	}
+	c.opts.endpoint = endpoint
+	c.opts.namespaceID = namespaceID
+	return c
+}
+
+func (c Config) init() error {
+	raw, err := url.Parse(c.opts.endpoint)
 	if err != nil {
 		return nil
 	}
@@ -37,11 +83,11 @@ func NewSource(endpoint string, namespaceID string, group string, dataID string,
 		},
 	}
 	cc := constant.ClientConfig{
-		NamespaceId:         namespaceID, //namespace id
+		NamespaceId:         c.opts.namespaceID, //namespace id
 		TimeoutMs:           5000,
 		NotLoadCacheAtStart: true,
-		LogDir:              logDir,
-		CacheDir:            cacheDir,
+		LogDir:              c.opts.logDir,
+		CacheDir:            c.opts.cacheDir,
 		RotateTime:          "1h",
 		MaxAge:              3,
 		LogLevel:            "error",
@@ -51,21 +97,22 @@ func NewSource(endpoint string, namespaceID string, group string, dataID string,
 		"clientConfig":  cc,
 	})
 	if err != nil {
-		return nil
+		return err
 	}
-
-	return &Config{
-		Group:  group,
-		DataID: dataID,
-		client: client,
-	}
+	c.client = client
+	return nil
 }
 
-func (n *Config) Load() ([]*config.KeyValue, error) {
+func (c *Config) Load() ([]*config.KeyValue, error) {
 
-	content, err := n.client.GetConfig(vo.ConfigParam{
-		DataId: n.DataID,
-		Group:  n.Group,
+	err := c.init()
+	if err != nil {
+		return nil, err
+	}
+
+	content, err := c.client.GetConfig(vo.ConfigParam{
+		DataId: c.opts.dataID,
+		Group:  c.opts.group,
 	})
 
 	if err != nil {
@@ -74,17 +121,17 @@ func (n *Config) Load() ([]*config.KeyValue, error) {
 
 	return []*config.KeyValue{
 		&config.KeyValue{
-			Key:   n.DataID,
+			Key:   c.opts.dataID,
 			Value: []byte(content),
 		},
 	}, nil
 }
 
-func (n *Config) Watch() (config.Watcher, error) {
-	watcher := newNacosWatcher(n.DataID, n.Group)
-	err := n.client.ListenConfig(vo.ConfigParam{
-		DataId: n.DataID,
-		Group:  n.Group,
+func (c *Config) Watch() (config.Watcher, error) {
+	watcher := newNacosWatcher(c.opts.dataID, c.opts.group)
+	err := c.client.ListenConfig(vo.ConfigParam{
+		DataId: c.opts.dataID,
+		Group:  c.opts.group,
 		OnChange: func(namespace, group, dataId, data string) {
 			if dataId == watcher.dataID && group == watcher.dataID {
 				watcher.content = data

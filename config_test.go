@@ -13,8 +13,8 @@ func TestConfig_Load(t *testing.T) {
 		config.WithSource(
 			NewSource("http://xxxx.com",
 				"xx",
-				"test",
-				"test", "", ""),
+				Group("test"),
+				DataID("test")),
 		),
 		config.WithDecoder(func(kv *config.KeyValue, v map[string]interface{}) error {
 			return yaml.Unmarshal(kv.Value, v)

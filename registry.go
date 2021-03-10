@@ -18,14 +18,31 @@ import (
 )
 
 type Registry struct {
-	group  string
+	opts   options
 	client naming_client.INamingClient
 }
 
-func NewRegistry(endpoint string, namespaceID string, group string) *Registry {
-	raw, err := url.Parse(endpoint)
+func NewRegistry(endpoint string, namespaceID string, opts ...Option) (*Registry, error) {
+	_options := options{}
+	for _, o := range opts {
+		o(&_options)
+	}
+	r := &Registry{
+		opts: _options,
+	}
+	r.opts.endpoint = endpoint
+	r.opts.namespaceID = namespaceID
+	err := r.init()
 	if err != nil {
-		return nil
+		return nil, err
+	}
+	return r, err
+}
+
+func (r *Registry) init() error {
+	raw, err := url.Parse(r.opts.endpoint)
+	if err != nil {
+		return err
 	}
 	addr := raw.Hostname()
 	port, _ := strconv.ParseUint(raw.Port(), 10, 16)
@@ -36,9 +53,8 @@ func NewRegistry(endpoint string, namespaceID string, group string) *Registry {
 			Port:   port,
 		},
 	}
-
 	cc := constant.ClientConfig{
-		NamespaceId:         namespaceID, //namespace id
+		NamespaceId:         r.opts.namespaceID, //namespace id
 		TimeoutMs:           5000,
 		NotLoadCacheAtStart: true,
 		RotateTime:          "1h",
@@ -50,10 +66,11 @@ func NewRegistry(endpoint string, namespaceID string, group string) *Registry {
 		"serverConfigs": sc,
 		"clientConfig":  cc,
 	})
-	return &Registry{
-		group:  group,
-		client: client,
+	if err != nil {
+		return err
 	}
+	r.client = client
+	return nil
 }
 
 func (r *Registry) Register(ctx context.Context, service *registry.ServiceInstance) error {
@@ -78,7 +95,7 @@ func (r *Registry) Register(ctx context.Context, service *registry.ServiceInstan
 		Healthy:     true,
 		Metadata:    service.Metadata,
 		ServiceName: service.ID,
-		GroupName:   r.group,
+		GroupName:   r.opts.group,
 	}
 	if params.Metadata == nil {
 		params.Metadata = make(map[string]string)
@@ -106,7 +123,7 @@ func (r *Registry) Deregister(ctx context.Context, service *registry.ServiceInst
 		Ip:          addr,
 		Port:        port,
 		ServiceName: service.ID,
-		GroupName:   r.group,
+		GroupName:   r.opts.group,
 	})
 
 	return err
@@ -115,7 +132,7 @@ func (r *Registry) Deregister(ctx context.Context, service *registry.ServiceInst
 func (r *Registry) Fetch(ctx context.Context, serviceName string) ([]*registry.ServiceInstance, error) {
 	s, err := r.client.GetService(vo.GetServiceParam{
 		ServiceName: serviceName,
-		GroupName:   r.group,
+		GroupName:   r.opts.group,
 	})
 	if err != nil {
 		return nil, err
@@ -139,7 +156,7 @@ func (r *Registry) Watch(ctx context.Context, serviceName string) (registry.Watc
 	}
 	r.client.Subscribe(&vo.SubscribeParam{
 		ServiceName: serviceName,
-		GroupName:   r.group,
+		GroupName:   r.opts.group,
 		SubscribeCallback: func(services []model.SubscribeService, err error) {
 			watcher.services = services
 		},

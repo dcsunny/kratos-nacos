@@ -11,8 +11,16 @@ import (
 
 func TestRegistry_Register(t *testing.T) {
 	serviceName := "config_test"
-	_registry := NewRegistry("http://xxx", "xxx", "test123")
-	err := _registry.Register(context.Background(), &registry.ServiceInstance{
+	_registry, err := NewRegistry("http://xxx",
+		"xxx",
+		Group("test123"))
+
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	err = _registry.Register(context.Background(), &registry.ServiceInstance{
 		ID:        serviceName,
 		Name:      serviceName,
 		Version:   "v1.0",
