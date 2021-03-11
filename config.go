@@ -1,6 +1,7 @@
 package nacos
 
 import (
+	"context"
 	"net/url"
 	"strconv"
 
@@ -67,7 +68,7 @@ func NewSource(endpoint string, namespaceID string, opts ...Option) config.Sourc
 	return c
 }
 
-func (c Config) init() error {
+func (c *Config) init() error {
 	raw, err := url.Parse(c.opts.endpoint)
 	if err != nil {
 		return nil
@@ -128,13 +129,13 @@ func (c *Config) Load() ([]*config.KeyValue, error) {
 }
 
 func (c *Config) Watch() (config.Watcher, error) {
-	watcher := newNacosWatcher(c.opts.dataID, c.opts.group)
+	watcher := newNacosWatcher(c.opts.dataID, c.opts.group, c.client.CancelListenConfig)
 	err := c.client.ListenConfig(vo.ConfigParam{
 		DataId: c.opts.dataID,
 		Group:  c.opts.group,
 		OnChange: func(namespace, group, dataId, data string) {
-			if dataId == watcher.dataID && group == watcher.dataID {
-				watcher.content = data
+			if dataId == watcher.dataID && group == watcher.group {
+				watcher.content <- data
 			}
 			return
 		},
@@ -146,32 +147,48 @@ func (c *Config) Watch() (config.Watcher, error) {
 }
 
 type ConfigWatcher struct {
-	dataID  string
-	group   string
-	content string
-	client  config_client.IConfigClient
+	context.Context
+	dataID             string
+	group              string
+	content            chan string
+	cancelListenConfig cancelListenConfigFunc
+	cancel             context.CancelFunc
 }
 
-func newNacosWatcher(dataID string, group string) *ConfigWatcher {
-	return &ConfigWatcher{
-		dataID: dataID,
-		group:  group,
+type cancelListenConfigFunc func(params vo.ConfigParam) (err error)
+
+func newNacosWatcher(dataID string, group string, cancelListenConfig cancelListenConfigFunc) *ConfigWatcher {
+	w := &ConfigWatcher{
+		dataID:             dataID,
+		group:              group,
+		cancelListenConfig: cancelListenConfig,
+		content:            make(chan string, 1),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Context = ctx
+	w.cancel = cancel
+	return w
+}
+
+func (w *ConfigWatcher) Next() ([]*config.KeyValue, error) {
+	select {
+	case <-w.Context.Done():
+		return nil, nil
+	case content := <-w.content:
+		return []*config.KeyValue{
+			&config.KeyValue{
+				Key:   w.dataID,
+				Value: []byte(content),
+			},
+		}, nil
 	}
 }
 
-func (n *ConfigWatcher) Next() ([]*config.KeyValue, error) {
-	return []*config.KeyValue{
-		&config.KeyValue{
-			Key:   n.dataID,
-			Value: []byte(n.content),
-		},
-	}, nil
-}
-
-func (n *ConfigWatcher) Close() error {
-	err := n.client.CancelListenConfig(vo.ConfigParam{
-		DataId: n.dataID,
-		Group:  n.group,
+func (w *ConfigWatcher) Close() error {
+	w.cancel()
+	err := w.cancelListenConfig(vo.ConfigParam{
+		DataId: w.dataID,
+		Group:  w.group,
 	})
 	return err
 }

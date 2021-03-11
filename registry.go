@@ -92,15 +92,17 @@ func (r *Registry) Register(ctx context.Context, service *registry.ServiceInstan
 		Port:        port,
 		Weight:      1,
 		Enable:      true,
-		Healthy:     true,
+		Healthy:     false,
 		Metadata:    service.Metadata,
-		ServiceName: service.ID,
+		ServiceName: service.Name,
 		GroupName:   r.opts.group,
 	}
 	if params.Metadata == nil {
 		params.Metadata = make(map[string]string)
 	}
 	params.Metadata["scheme"] = scheme
+	params.Metadata["id"] = service.ID
+	params.Metadata["name"] = service.Name
 	_, err := r.client.RegisterInstance(params)
 	return err
 }
@@ -122,7 +124,7 @@ func (r *Registry) Deregister(ctx context.Context, service *registry.ServiceInst
 	_, err := r.client.DeregisterInstance(vo.DeregisterInstanceParam{
 		Ip:          addr,
 		Port:        port,
-		ServiceName: service.ID,
+		ServiceName: service.Name,
 		GroupName:   r.opts.group,
 	})
 
@@ -140,7 +142,7 @@ func (r *Registry) Fetch(ctx context.Context, serviceName string) ([]*registry.S
 	instances := make([]*registry.ServiceInstance, len(s.Hosts))
 	for k, v := range s.Hosts {
 		instances[k] = &registry.ServiceInstance{
-			ID:   v.ServiceName,
+			ID:   v.Metadata["id"],
 			Name: v.ServiceName,
 			Endpoints: []string{
 				fmt.Sprintf("%s://%s:%d", v.Metadata["scheme"], v.Ip, v.Port),
@@ -151,16 +153,18 @@ func (r *Registry) Fetch(ctx context.Context, serviceName string) ([]*registry.S
 }
 
 func (r *Registry) Watch(ctx context.Context, serviceName string) (registry.Watcher, error) {
-	watcher := RegistryWatcher{
-		unsubscribe: r.client.Unsubscribe,
-	}
-	r.client.Subscribe(&vo.SubscribeParam{
+	watcher := newRegistryWatcher(r.opts.group, serviceName, r.client.Unsubscribe)
+	err := r.client.Subscribe(&vo.SubscribeParam{
 		ServiceName: serviceName,
 		GroupName:   r.opts.group,
 		SubscribeCallback: func(services []model.SubscribeService, err error) {
-			watcher.services = services
+			watcher.services <- services
 		},
 	})
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
 	return watcher, nil
 }
 
@@ -177,32 +181,56 @@ func getPort(scheme string, port uint64) uint64 {
 }
 
 type RegistryWatcher struct {
-	services    []model.SubscribeService
-	unsubscribe func(param *vo.SubscribeParam) error
+	services    chan []model.SubscribeService
+	unsubscribe unsubscribeFunc
 	serviceName string
 	group       string
+
+	context.Context
+	cancel context.CancelFunc
 }
 
-func (r RegistryWatcher) Next() ([]*registry.ServiceInstance, error) {
-	instances := make([]*registry.ServiceInstance, 0)
-	for _, v := range r.services {
-		ins := &registry.ServiceInstance{
-			ID:       v.ServiceName,
-			Name:     v.ServiceName,
-			Metadata: v.Metadata,
-			Endpoints: []string{
-				fmt.Sprintf("%s://%s:%d", v.Metadata["scheme"], v.Ip, v.Port),
-			},
-		}
-		instances = append(instances, ins)
+type unsubscribeFunc func(param *vo.SubscribeParam) error
+
+func newRegistryWatcher(group string, serviceName string, unsubscribe unsubscribeFunc) *RegistryWatcher {
+	w := &RegistryWatcher{
+		group:       group,
+		serviceName: serviceName,
+		unsubscribe: unsubscribe,
+		services:    make(chan []model.SubscribeService, 1),
 	}
-	return instances, nil
+	ctx, cancel := context.WithCancel(context.Background())
+	w.Context = ctx
+	w.cancel = cancel
+	return w
 }
 
-func (r RegistryWatcher) Close() error {
-	err := r.unsubscribe(&vo.SubscribeParam{
-		ServiceName: r.serviceName,
-		GroupName:   r.group,
+func (w *RegistryWatcher) Next() ([]*registry.ServiceInstance, error) {
+	select {
+	case <-w.Context.Done():
+		return nil, nil
+	case services := <-w.services:
+		instances := make([]*registry.ServiceInstance, 0)
+		for _, v := range services {
+			ins := &registry.ServiceInstance{
+				ID:       v.Metadata["id"],
+				Name:     v.ServiceName,
+				Metadata: v.Metadata,
+				Endpoints: []string{
+					fmt.Sprintf("%s://%s:%d", v.Metadata["scheme"], v.Ip, v.Port),
+				},
+			}
+			instances = append(instances, ins)
+		}
+		return instances, nil
+	}
+}
+
+func (w *RegistryWatcher) Close() error {
+	w.cancel()
+	err := w.unsubscribe(&vo.SubscribeParam{
+		ServiceName: w.serviceName,
+		GroupName:   w.group,
 	})
 	return err
 }
