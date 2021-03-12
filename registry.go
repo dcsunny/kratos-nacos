@@ -55,11 +55,17 @@ func (r *Registry) init() error {
 	}
 	cc := constant.ClientConfig{
 		NamespaceId:         r.opts.namespaceID, //namespace id
-		TimeoutMs:           5000,
+		TimeoutMs:           r.opts.timeoutMs,
 		NotLoadCacheAtStart: true,
-		RotateTime:          "1h",
-		MaxAge:              3,
-		LogLevel:            "warn",
+		LogLevel:            r.opts.logLevel,
+	}
+
+	if cc.LogLevel == "" {
+		cc.LogLevel = LogLevelWarn
+	}
+
+	if cc.TimeoutMs == 0 {
+		cc.TimeoutMs = 5000
 	}
 
 	client, err := clients.CreateNamingClient(map[string]interface{}{
@@ -87,22 +93,26 @@ func (r *Registry) Register(ctx context.Context, service *registry.ServiceInstan
 		scheme = raw.Scheme
 		port = getPort(scheme, port)
 	}
+
 	params := vo.RegisterInstanceParam{
 		Ip:          addr,
 		Port:        port,
 		Weight:      1,
 		Enable:      true,
-		Healthy:     false,
+		Healthy:     true,
 		Metadata:    service.Metadata,
 		ServiceName: service.Name,
 		GroupName:   r.opts.group,
 	}
+
 	if params.Metadata == nil {
 		params.Metadata = make(map[string]string)
 	}
+
 	params.Metadata["scheme"] = scheme
 	params.Metadata["id"] = service.ID
 	params.Metadata["name"] = service.Name
+	params.Metadata["version"] = service.Version
 	_, err := r.client.RegisterInstance(params)
 	return err
 }

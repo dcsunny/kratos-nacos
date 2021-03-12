@@ -22,6 +22,9 @@ type options struct {
 	group  string
 	dataID string
 
+	timeoutMs uint64
+	logLevel  string
+
 	logDir   string
 	cacheDir string
 }
@@ -47,6 +50,18 @@ func LogDir(logDir string) Option {
 func CacheDir(cacheDir string) Option {
 	return func(o *options) {
 		o.cacheDir = cacheDir
+	}
+}
+
+func LogLevel(logLevel string) Option {
+	return func(o *options) {
+		o.logLevel = logLevel
+	}
+}
+
+func TimeoutMs(timeoutMs uint64) Option {
+	return func(o *options) {
+		o.timeoutMs = timeoutMs
 	}
 }
 
@@ -85,14 +100,21 @@ func (c *Config) init() error {
 	}
 	cc := constant.ClientConfig{
 		NamespaceId:         c.opts.namespaceID, //namespace id
-		TimeoutMs:           5000,
+		TimeoutMs:           c.opts.timeoutMs,
 		NotLoadCacheAtStart: true,
 		LogDir:              c.opts.logDir,
 		CacheDir:            c.opts.cacheDir,
-		RotateTime:          "1h",
-		MaxAge:              3,
-		LogLevel:            "error",
+		LogLevel:            c.opts.logLevel,
 	}
+
+	if cc.LogLevel == "" {
+		cc.LogLevel = LogLevelWarn
+	}
+
+	if cc.TimeoutMs == 0 {
+		cc.TimeoutMs = 5000
+	}
+
 	client, err := clients.CreateConfigClient(map[string]interface{}{
 		"serverConfigs": sc,
 		"clientConfig":  cc,
