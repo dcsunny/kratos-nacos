@@ -244,3 +244,7 @@ func (w *RegistryWatcher) Close() error {
 	})
 	return err
 }
+
+func (w *RegistryWatcher) Stop() error {
+	return w.Close()
+}

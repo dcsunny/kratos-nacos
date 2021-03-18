@@ -214,3 +214,7 @@ func (w *ConfigWatcher) Close() error {
 	})
 	return err
 }
+
+func (w *ConfigWatcher) Stop() error {
+	return w.Close()
+}
