@@ -162,6 +162,10 @@ func (r *Registry) Fetch(ctx context.Context, serviceName string) ([]*registry.S
 	return instances, nil
 }
 
+func (r *Registry) GetService(ctx context.Context, serviceName string) ([]*registry.ServiceInstance, error) {
+	return r.Fetch(ctx, serviceName)
+}
+
 func (r *Registry) Watch(ctx context.Context, serviceName string) (registry.Watcher, error) {
 	watcher := newRegistryWatcher(r.opts.group, serviceName, r.client.Unsubscribe)
 	err := r.client.Subscribe(&vo.SubscribeParam{
