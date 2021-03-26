@@ -2,6 +2,7 @@ package nacos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -179,6 +180,39 @@ func (r *Registry) Watch(ctx context.Context, serviceName string) (registry.Watc
 		fmt.Println(err)
 		return nil, err
 	}
+	ins, err := r.GetService(ctx, serviceName)
+	if err != nil {
+		return nil, err
+	}
+	services := make([]model.SubscribeService, 0)
+	for _, v := range ins {
+		if len(v.Endpoints) == 0 {
+			return nil, errors.New("endpoints is empty")
+		}
+		link, err := url.Parse(v.Endpoints[0])
+		if err != nil {
+			return nil, errors.New(fmt.Sprintf("endpoints is err,%s", v.Endpoints[0]))
+		}
+		if v.Metadata == nil {
+			v.Metadata = make(map[string]string)
+		}
+		v.Metadata["scheme"] = link.Scheme
+		v.Metadata["id"] = v.ID
+		v.Metadata["name"] = v.Name
+		v.Metadata["version"] = v.Version
+		port, _ := strconv.Atoi(link.Port())
+		services = append(services, model.SubscribeService{
+			Enable:      true,
+			InstanceId:  v.ID,
+			Ip:          link.Hostname(),
+			Metadata:    v.Metadata,
+			Port:        uint64(port),
+			ServiceName: v.Name,
+			Valid:       true,
+			Weight:      1,
+		})
+	}
+	watcher.services <- services
 	return watcher, nil
 }
 
