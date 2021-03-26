@@ -167,7 +167,7 @@ func (r *Registry) GetService(ctx context.Context, serviceName string) ([]*regis
 }
 
 func (r *Registry) Watch(ctx context.Context, serviceName string) (registry.Watcher, error) {
-	watcher := newRegistryWatcher(r.opts.group, serviceName, r.client.Unsubscribe)
+	watcher := newRegistryWatcher(ctx, r.opts.group, serviceName, r.client.Unsubscribe)
 	err := r.client.Subscribe(&vo.SubscribeParam{
 		ServiceName: serviceName,
 		GroupName:   r.opts.group,
@@ -206,14 +206,14 @@ type RegistryWatcher struct {
 
 type unsubscribeFunc func(param *vo.SubscribeParam) error
 
-func newRegistryWatcher(group string, serviceName string, unsubscribe unsubscribeFunc) *RegistryWatcher {
+func newRegistryWatcher(ctx context.Context, group string, serviceName string, unsubscribe unsubscribeFunc) *RegistryWatcher {
 	w := &RegistryWatcher{
 		group:       group,
 		serviceName: serviceName,
 		unsubscribe: unsubscribe,
-		services:    make(chan []model.SubscribeService, 1),
+		services:    make(chan []model.SubscribeService, 100),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	w.Context = ctx
 	w.cancel = cancel
 	return w
@@ -241,11 +241,11 @@ func (w *RegistryWatcher) Next() ([]*registry.ServiceInstance, error) {
 }
 
 func (w *RegistryWatcher) Close() error {
-	w.cancel()
 	err := w.unsubscribe(&vo.SubscribeParam{
 		ServiceName: w.serviceName,
 		GroupName:   w.group,
 	})
+	w.cancel()
 	return err
 }
 

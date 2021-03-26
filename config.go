@@ -151,7 +151,7 @@ func (c *Config) Load() ([]*config.KeyValue, error) {
 }
 
 func (c *Config) Watch() (config.Watcher, error) {
-	watcher := newNacosWatcher(c.opts.dataID, c.opts.group, c.client.CancelListenConfig)
+	watcher := newNacosWatcher(context.Background(), c.opts.dataID, c.opts.group, c.client.CancelListenConfig)
 	err := c.client.ListenConfig(vo.ConfigParam{
 		DataId: c.opts.dataID,
 		Group:  c.opts.group,
@@ -179,14 +179,14 @@ type ConfigWatcher struct {
 
 type cancelListenConfigFunc func(params vo.ConfigParam) (err error)
 
-func newNacosWatcher(dataID string, group string, cancelListenConfig cancelListenConfigFunc) *ConfigWatcher {
+func newNacosWatcher(ctx context.Context, dataID string, group string, cancelListenConfig cancelListenConfigFunc) *ConfigWatcher {
 	w := &ConfigWatcher{
 		dataID:             dataID,
 		group:              group,
 		cancelListenConfig: cancelListenConfig,
-		content:            make(chan string, 1),
+		content:            make(chan string, 100),
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	w.Context = ctx
 	w.cancel = cancel
 	return w
@@ -207,11 +207,11 @@ func (w *ConfigWatcher) Next() ([]*config.KeyValue, error) {
 }
 
 func (w *ConfigWatcher) Close() error {
-	w.cancel()
 	err := w.cancelListenConfig(vo.ConfigParam{
 		DataId: w.dataID,
 		Group:  w.group,
 	})
+	w.cancel()
 	return err
 }
 
