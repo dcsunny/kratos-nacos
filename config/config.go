@@ -1,7 +1,8 @@
-package nacos
+package config
 
 import (
 	"context"
+	"net"
 	"net/url"
 	"strconv"
 
@@ -27,6 +28,10 @@ type options struct {
 
 	logDir   string
 	cacheDir string
+
+	//网关需要用的
+	cluster string
+	weight  float64
 }
 
 func Group(group string) Option {
@@ -84,18 +89,24 @@ func NewSource(endpoint string, namespaceID string, opts ...Option) config.Sourc
 }
 
 func (c *Config) init() error {
-	raw, err := url.Parse(c.opts.endpoint)
+	u, err := url.Parse(c.opts.endpoint)
 	if err != nil {
-		return nil
+		return err
 	}
-	addr := raw.Hostname()
-	port, _ := strconv.ParseUint(raw.Port(), 10, 16)
-	port = getPort(raw.Scheme, port)
+
+	host, port, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		return err
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return err
+	}
 
 	sc := []constant.ServerConfig{
 		{
-			IpAddr: addr,
-			Port:   port,
+			IpAddr: host,
+			Port:   uint64(p),
 		},
 	}
 	cc := constant.ClientConfig{

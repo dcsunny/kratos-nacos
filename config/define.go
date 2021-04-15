@@ -1,4 +1,4 @@
-package nacos
+package config
 
 const (
 	LogLevelError = "error"
