@@ -2,9 +2,11 @@ package config
 
 import (
 	"context"
-	"net"
 	"net/url"
 	"strconv"
+
+	"github.com/dcsunny/kratos-nacos/define"
+	"github.com/dcsunny/kratos-nacos/util"
 
 	"github.com/go-kratos/kratos/v2/config"
 	"github.com/nacos-group/nacos-sdk-go/clients"
@@ -12,63 +14,6 @@ import (
 	"github.com/nacos-group/nacos-sdk-go/common/constant"
 	"github.com/nacos-group/nacos-sdk-go/vo"
 )
-
-type Option func(*options)
-
-type options struct {
-	endpoint string
-
-	namespaceID string
-
-	group  string
-	dataID string
-
-	timeoutMs uint64
-	logLevel  string
-
-	logDir   string
-	cacheDir string
-
-	//网关需要用的
-	cluster string
-	weight  float64
-}
-
-func Group(group string) Option {
-	return func(o *options) {
-		o.group = group
-	}
-}
-
-func DataID(dataID string) Option {
-	return func(o *options) {
-		o.dataID = dataID
-	}
-}
-
-func LogDir(logDir string) Option {
-	return func(o *options) {
-		o.logDir = logDir
-	}
-}
-
-func CacheDir(cacheDir string) Option {
-	return func(o *options) {
-		o.cacheDir = cacheDir
-	}
-}
-
-func LogLevel(logLevel string) Option {
-	return func(o *options) {
-		o.logLevel = logLevel
-	}
-}
-
-func TimeoutMs(timeoutMs uint64) Option {
-	return func(o *options) {
-		o.timeoutMs = timeoutMs
-	}
-}
 
 type Config struct {
 	opts   options
@@ -89,24 +34,18 @@ func NewSource(endpoint string, namespaceID string, opts ...Option) config.Sourc
 }
 
 func (c *Config) init() error {
-	u, err := url.Parse(c.opts.endpoint)
+	raw, err := url.Parse(c.opts.endpoint)
 	if err != nil {
-		return err
+		return nil
 	}
-
-	host, port, err := net.SplitHostPort(u.Host)
-	if err != nil {
-		return err
-	}
-	p, err := strconv.Atoi(port)
-	if err != nil {
-		return err
-	}
+	addr := raw.Hostname()
+	port, _ := strconv.ParseUint(raw.Port(), 10, 16)
+	port = util.GetPort(raw.Scheme, port)
 
 	sc := []constant.ServerConfig{
 		{
-			IpAddr: host,
-			Port:   uint64(p),
+			IpAddr: addr,
+			Port:   port,
 		},
 	}
 	cc := constant.ClientConfig{
@@ -119,7 +58,7 @@ func (c *Config) init() error {
 	}
 
 	if cc.LogLevel == "" {
-		cc.LogLevel = LogLevelWarn
+		cc.LogLevel = define.LogLevelWarn
 	}
 
 	if cc.TimeoutMs == 0 {
